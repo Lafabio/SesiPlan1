@@ -1169,6 +1169,13 @@ const GERENCIADOR = {
   tipo:    "gerenciador"
 };
 
+const MANUTENCAO = {
+  usuario: "manutencao",
+  email:   "manutencao@sesi",
+  nome:    "Usuário Manutenção",
+  tipo:    "manutencao"
+};
+
 const DISCIPLINAS_BASE = [
   { id:"biologia",             nome:"Biologia",             icone:"🧬" },
   { id:"biohackeria",          nome:"Biohackeria",          icone:"🔬" },
@@ -1266,10 +1273,18 @@ function fazerLogin() {
     iniciarApp(); return;
   }
 
+  // Manutenção
+  const manPwd = S.get('manutencao_senha') || 'manut2024';
+  if ((usr === MANUTENCAO.usuario || usr === MANUTENCAO.email) && pwd === manPwd) {
+    usuarioLogado = { ...MANUTENCAO };
+    S.setObj('sessao', usuarioLogado);
+    iniciarApp(); return;
+  }
+
   // Professores
   const perfil = S.getObj('usuario_' + usr) || buscarPorEmail(usr);
   if (!perfil) { toast('Usuário não encontrado','error'); return; }
-  const senhaKey = perfil.tipo === 'gerenciador' ? 'gerenciador_senha' : 'senha_' + perfil.usuario;
+  const senhaKey = perfil.tipo === 'gerenciador' ? 'gerenciador_senha' : (perfil.tipo === 'manutencao' ? 'manutencao_senha' : 'senha_' + perfil.usuario);
   const senhaCorreto = S.get(senhaKey);
   if (!senhaCorreto || senhaCorreto !== pwd) { toast('Senha incorreta','error'); return; }
 
@@ -1342,6 +1357,14 @@ function iniciarRecuperacao() {
     mostrarNovaSenha(); return;
   }
 
+  // Manutenção
+  if (usr === MANUTENCAO.usuario && email === MANUTENCAO.email) {
+    const cod = Math.random().toString(36).substring(2,8).toUpperCase();
+    S.setObj('rec_'+usr, { codigo:cod, expira: Date.now()+3600000, usuario:usr });
+    alert(`🔑 Código de recuperação (simulação):\n\n${cod}\n\nEm produção seria enviado para ${email}`);
+    mostrarNovaSenha(); return;
+  }
+
   const perfil = S.getObj('usuario_'+usr);
   if (!perfil || perfil.email !== email) { toast('Dados não correspondem','error'); return; }
   const cod = Math.random().toString(36).substring(2,8).toUpperCase();
@@ -1369,7 +1392,14 @@ function definirNovaSenha() {
   }
   if (!usrRec) { toast('Código inválido ou expirado','error'); return; }
 
-  const chave = usrRec === GERENCIADOR.usuario ? 'gerenciador_senha' : 'senha_'+usrRec;
+  let chave;
+  if (usrRec === GERENCIADOR.usuario) {
+    chave = 'gerenciador_senha';
+  } else if (usrRec === MANUTENCAO.usuario) {
+    chave = 'manutencao_senha';
+  } else {
+    chave = 'senha_' + usrRec;
+  }
   S.set(chave, pwd);
   toast('Senha alterada! Faça login.','success');
   mostrarLogin();
@@ -1428,8 +1458,14 @@ function atualizarInterface() {
 
   const tipo = usuarioLogado.tipo;
   document.getElementById('btnAdmin').classList.toggle('hidden', tipo !== 'superuser');
-  document.getElementById('btnGerenciador').classList.toggle('hidden', tipo !== 'gerenciador');
+  document.getElementById('btnGerenciador').classList.toggle('hidden', tipo !== 'gerenciador' && tipo !== 'manutencao');
   atualizarStatusHorario();
+  
+  // Esconde campos de API para usuários normais
+  const mostrarAPI = (tipo === 'superuser' || tipo === 'gerenciador' || tipo === 'manutencao');
+  document.querySelectorAll('.ia-bar input[type="password"], .ia-bar select#groqModelo').forEach(el => {
+    el.style.display = mostrarAPI ? '' : 'none';
+  });
 }
 
 // ============================================================
@@ -1896,6 +1932,12 @@ function alternarProvedor() {
 }
 
 async function gerarPlanoComIA() {
+  // Verifica se usuário tem permissão para usar API
+  if (!usuarioLogado || (usuarioLogado.tipo !== 'superuser' && usuarioLogado.tipo !== 'gerenciador' && usuarioLogado.tipo !== 'manutencao')) {
+    toast('Apenas administradores podem configurar a API','error');
+    return;
+  }
+
   const titulo=document.getElementById('modalTitulo').value.trim();
   const hab=document.getElementById('modalHabilidade').value.trim();
   const prov=document.getElementById('provedorIA').value;
@@ -2530,7 +2572,7 @@ function fecharModalAdmin() { document.getElementById('modalAdmin').classList.ad
 // GERENCIADOR
 // ============================================================
 function abrirPainelGerenciador() {
-  if (!usuarioLogado||usuarioLogado.tipo!=='gerenciador') return;
+  if (!usuarioLogado || (usuarioLogado.tipo !== 'gerenciador' && usuarioLogado.tipo !== 'manutencao')) return;
   const c = document.getElementById('conteudoGerenciador');
 
   let usuarios=[];
@@ -2567,8 +2609,8 @@ function abrirPainelGerenciador() {
             ${u.cargaHoraria ? `<div style="color:var(--text-soft);font-size:.75rem;">⏱️ ${u.cargaHoraria}</div>` : ''}
           </div>
           <button class="btn btn-ghost btn-sm" onclick="verPlanosProfessor('${u.usuario}')">📋 Ver Planos</button>
-          <button class="btn btn-ghost btn-sm" onclick="resetarSenhaProfessor('${u.usuario}')">🔄 Reset senha</button>
-          <button class="btn btn-danger btn-sm" onclick="removerProfessor('${u.usuario}')">✖</button>
+          ${usuarioLogado.tipo === 'gerenciador' ? `<button class="btn btn-ghost btn-sm" onclick="resetarSenhaProfessor('${u.usuario}')">🔄 Reset senha</button>` : ''}
+          ${usuarioLogado.tipo === 'gerenciador' ? `<button class="btn btn-danger btn-sm" onclick="removerProfessor('${u.usuario}')">✖</button>` : ''}
         </div>`).join('')}
     </div>
 
@@ -2583,6 +2625,15 @@ function abrirPainelGerenciador() {
 function fecharModalGerenciador() { document.getElementById('modalGerenciador').classList.add('hidden'); }
 
 function resetarSenhaProfessor(usr) {
+  const perfil = S.getObj('usuario_' + usr);
+  if (!perfil) { toast('Usuário não encontrado','error'); return; }
+  
+  // Não permite reset de usuários especiais
+  if (perfil.tipo === 'manutencao') {
+    toast('Não é possível resetar senha de usuário de manutenção pelo painel','error');
+    return;
+  }
+  
   const nova=prompt(`Nova senha para "${usr}" (mín. 6 caracteres):`);
   if (!nova||nova.length<6) { toast('Senha inválida','error'); return; }
   if (confirm(`Resetar senha de "${usr}"?`)) {
@@ -2592,6 +2643,15 @@ function resetarSenhaProfessor(usr) {
 }
 
 function removerProfessor(usr) {
+  const perfil = S.getObj('usuario_' + usr);
+  if (!perfil) { toast('Usuário não encontrado','error'); return; }
+  
+  // Não permite remoção de usuários especiais
+  if (perfil.tipo === 'manutencao') {
+    toast('Não é possível remover usuário de manutenção','error');
+    return;
+  }
+  
   if (!confirm(`Remover TODOS os dados de "${usr}"? Irreversível.`)) return;
   ['usuario_','senha_','horario_','histHorario_','plan_','dataInicio_','discCustom_','foto_'].forEach(p=>S.del(p+usr));
   toast(`Usuário ${usr} removido`,'success');
@@ -2707,8 +2767,16 @@ function salvarNovaSenha() {
   const conf =document.getElementById('confirmarSenhaModal').value;
 
   const usr=usuarioLogado.usuario;
-  const chaveAtual = usr===GERENCIADOR.usuario ? 'gerenciador_senha' : 'senha_'+usr;
-  const senhaAtualCorreta = S.get(chaveAtual) || (usr===GERENCIADOR.usuario?'lilica10':'');
+  let chaveAtual;
+  if (usr === GERENCIADOR.usuario) {
+    chaveAtual = 'gerenciador_senha';
+  } else if (usr === MANUTENCAO.usuario) {
+    chaveAtual = 'manutencao_senha';
+  } else {
+    chaveAtual = 'senha_' + usr;
+  }
+  const senhaPadrao = (usr === GERENCIADOR.usuario) ? 'lilica10' : ((usr === MANUTENCAO.usuario) ? 'manut2024' : '');
+  const senhaAtualCorreta = S.get(chaveAtual) || senhaPadrao;
 
   if (atual!==senhaAtualCorreta) { toast('Senha atual incorreta','error'); return; }
   if (nova.length<6)             { toast('Mínimo 6 caracteres','error'); return; }
@@ -2846,8 +2914,8 @@ document.addEventListener('DOMContentLoaded', ()=>{
 
   const sessao=S.getObj('sessao');
   if (sessao) {
-    // Verifica se gerenciador
-    if (sessao.tipo==='gerenciador') { usuarioLogado=sessao; iniciarApp(); return; }
+    // Verifica se gerenciador ou manutencao
+    if (sessao.tipo==='gerenciador' || sessao.tipo==='manutencao') { usuarioLogado=sessao; iniciarApp(); return; }
     // Verifica se professor ainda existe
     const perfil=S.getObj('usuario_'+sessao.usuario);
     if (perfil) { usuarioLogado=perfil; iniciarApp(); return; }
