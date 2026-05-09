@@ -870,6 +870,7 @@ h1, h2, h3, h4 { font-weight: 600; letter-spacing: -0.02em; }
       <button class="btn btn-ghost btn-sm" onclick="abrirConfiguracaoHorario()">🕐 Horário</button>
       <button id="btnAdmin" class="btn btn-ghost btn-sm hidden" onclick="abrirPainelAdmin()">⚙️ Admin</button>
       <button id="btnGerenciador" class="btn btn-ghost btn-sm hidden" onclick="abrirPainelGerenciador()">🛠️ Gerenciar</button>
+      <button class="btn btn-ghost btn-sm" onclick="abrirPerfilProfessor()">👤 Meu Perfil</button>
 
       <div class="header-sep"></div>
       <div class="header-user">
@@ -1139,6 +1140,21 @@ h1, h2, h3, h4 { font-weight: 600; letter-spacing: -0.02em; }
   </div>
 </div>
 
+<!-- ===== MODAL PERFIL PROFESSOR ===== -->
+<div id="modalPerfilProfessor" class="modal-overlay hidden" onclick="if(event.target===this)fecharModalPerfilProfessor()">
+  <div class="modal-box modal-lg">
+    <div class="modal-head">
+      <h3>👤 Perfil do Professor</h3>
+      <button class="btn btn-ghost btn-sm btn-icon" onclick="fecharModalPerfilProfessor()">✖</button>
+    </div>
+    <div class="modal-body" id="conteudoPerfilProfessor"></div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="fecharModalPerfilProfessor()">Fechar</button>
+      <button class="btn btn-primary" onclick="salvarPerfilProfessor()">💾 Salvar Perfil</button>
+    </div>
+  </div>
+</div>
+
 <!-- ===== TOAST CONTAINER ===== -->
 <div class="toast-container" id="toastContainer"></div>
 
@@ -1257,7 +1273,14 @@ function fazerLogin() {
   const senhaCorreto = S.get(senhaKey);
   if (!senhaCorreto || senhaCorreto !== pwd) { toast('Senha incorreta','error'); return; }
 
-  usuarioLogado = perfil;
+  // Carrega dados completos do perfil
+  usuarioLogado = {
+    ...perfil,
+    disciplina: perfil.disciplina || '',
+    cargaHoraria: perfil.cargaHoraria || '',
+    foto: perfil.foto || ''
+  };
+  
   if (document.getElementById('lembrarUsuario').checked) S.set('lembrado', usr);
   else S.del('lembrado');
   S.setObj('sessao', usuarioLogado);
@@ -1288,7 +1311,16 @@ function fazerCadastro() {
   if (usr === GERENCIADOR.usuario) { toast('Nome reservado','error'); return; }
   if (S.getObj('usuario_'+usr))    { toast('Usuário já cadastrado','error'); return; }
 
-  const novo = { nome, usuario:usr, email, tipo:'professor', dataCadastro: new Date().toISOString() };
+  const novo = { 
+    nome, 
+    usuario:usr, 
+    email, 
+    tipo:'professor', 
+    dataCadastro: new Date().toISOString(),
+    disciplina: '',
+    cargaHoraria: '',
+    foto: ''
+  };
   S.setObj('usuario_'+usr, novo);
   S.set('senha_'+usr, pwd);
   usuarioLogado = novo;
@@ -1366,6 +1398,14 @@ function carregarDados() {
   horarioAtivo      = S.getObj('horario_'+u) || {};
   historicoHorarios = S.getObj('histHorario_'+u) || [];
   disciplinasCustom = S.getObj('discCustom_'+u) || [];
+
+  // Carrega dados do perfil do professor
+  const perfilCompleto = S.getObj('usuario_'+u);
+  if (perfilCompleto) {
+    usuarioLogado.disciplina = perfilCompleto.disciplina || '';
+    usuarioLogado.cargaHoraria = perfilCompleto.cargaHoraria || '';
+    usuarioLogado.foto = perfilCompleto.foto || '';
+  }
 
   const data = S.get('dataInicio_'+u);
   if (data) {
@@ -2519,11 +2559,14 @@ function abrirPainelGerenciador() {
     <div style="max-height:200px;overflow-y:auto;margin-bottom:16px;">
       ${usuarios.map(u=>`
         <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border2);">
-          <div class="header-avatar" style="flex-shrink:0;">${u.nome[0].toUpperCase()}</div>
+          <div class="header-avatar" style="flex-shrink:0;${u.foto ? `background-image:url(${u.foto});background-size:cover;` : ''}">${!u.foto ? u.nome[0].toUpperCase() : ''}</div>
           <div style="flex:1;font-size:.85rem;">
             <div style="font-weight:600;">${u.nome} <span style="color:var(--text-soft);">(${u.usuario})</span></div>
             <div style="color:var(--text-soft);font-size:.75rem;">${u.email}</div>
+            ${u.disciplina ? `<div style="color:var(--brand);font-size:.75rem;font-weight:600;">📚 ${u.disciplina}</div>` : ''}
+            ${u.cargaHoraria ? `<div style="color:var(--text-soft);font-size:.75rem;">⏱️ ${u.cargaHoraria}</div>` : ''}
           </div>
+          <button class="btn btn-ghost btn-sm" onclick="verPlanosProfessor('${u.usuario}')">📋 Ver Planos</button>
           <button class="btn btn-ghost btn-sm" onclick="resetarSenhaProfessor('${u.usuario}')">🔄 Reset senha</button>
           <button class="btn btn-danger btn-sm" onclick="removerProfessor('${u.usuario}')">✖</button>
         </div>`).join('')}
@@ -2550,10 +2593,90 @@ function resetarSenhaProfessor(usr) {
 
 function removerProfessor(usr) {
   if (!confirm(`Remover TODOS os dados de "${usr}"? Irreversível.`)) return;
-  ['usuario_','senha_','horario_','histHorario_','plan_','dataInicio_','discCustom_'].forEach(p=>S.del(p+usr));
+  ['usuario_','senha_','horario_','histHorario_','plan_','dataInicio_','discCustom_','foto_'].forEach(p=>S.del(p+usr));
   toast(`Usuário ${usr} removido`,'success');
   fecharModalGerenciador();
   setTimeout(abrirPainelGerenciador, 100);
+}
+
+function verPlanosProfessor(usr) {
+  const planos = S.getObj('plan_' + usr) || {};
+  const perfil = S.getObj('usuario_' + usr);
+  
+  if (!perfil) { toast('Professor não encontrado', 'error'); return; }
+  
+  const semanas = Object.keys(planos).sort((a,b) => parseInt(a) - parseInt(b));
+  
+  let html = `
+    <div style="margin-bottom:16px;">
+      <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px;">
+        <div class="header-avatar" style="width:48px; height:48px; font-size:20px;">${perfil.nome[0].toUpperCase()}</div>
+        <div>
+          <h4 style="font-size:1.1rem;">${perfil.nome}</h4>
+          <div style="color:var(--text-soft); font-size:.85rem;">
+            ${perfil.disciplina ? `📚 ${perfil.disciplina}` : ''}
+            ${perfil.cargaHoraria ? ` • ⏱️ ${perfil.cargaHoraria}` : ''}
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+  
+  if (semanas.length === 0) {
+    html += `<div class="info-box">Nenhum plano registrado ainda.</div>`;
+  } else {
+    html += `<div class="section-title">📋 Planos por Semana</div>`;
+    html += `<div style="max-height:400px; overflow-y:auto;">`;
+    
+    semanas.forEach(sem => {
+      const dias = planos[sem];
+      if (!dias) return;
+      
+      html += `<div class="card" style="margin-bottom:12px;">`;
+      html += `<div style="font-weight:700; color:var(--brand); margin-bottom:8px;">Semana ${sem}</div>`;
+      
+      DIAS_SEMANA.forEach((dia, idx) => {
+        if (!dias[dia] || dias[dia].length === 0) return;
+        
+        html += `<div style="margin-bottom:8px; padding:8px; background:var(--surface2); border-radius:var(--radius-sm);">`;
+        html += `<div style="font-weight:600; color:var(--text-mid); font-size:.8rem; margin-bottom:4px;">${DIAS_COMPLETO[idx]}</div>`;
+        
+        dias[dia].forEach((aula, aIdx) => {
+          if (aula && aula.conteudo) {
+            html += `<div style="font-size:.85rem; padding:4px 0; border-bottom:1px dashed var(--border);">`;
+            html += `<span style="color:var(--brand); font-weight:600;">${HORARIOS[aIdx] || `Aula ${aIdx+1}`}</span>: `;
+            html += `<span style="color:var(--text);">${aula.conteudo.substring(0, 100)}${aula.conteudo.length > 100 ? '...' : ''}</span>`;
+            html += `</div>`;
+          }
+        });
+        
+        html += `</div>`;
+      });
+      
+      html += `</div>`;
+    });
+    
+    html += `</div>`;
+  }
+  
+  // Cria modal temporário para visualização
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.onclick = function() { overlay.remove(); };
+  overlay.innerHTML = `
+    <div class="modal-box modal-lg">
+      <div class="modal-head">
+        <h3>📋 Planos de ${perfil.nome.split(' ')[0]}</h3>
+        <button class="btn btn-ghost btn-sm btn-icon" onclick="this.closest('.modal-overlay').remove()">✖</button>
+      </div>
+      <div class="modal-body">${html}</div>
+      <div class="modal-foot">
+        <button class="btn btn-primary" onclick="this.closest('.modal-overlay').remove()">Fechar</button>
+      </div>
+    </div>
+  `;
+  
+  document.body.appendChild(overlay);
 }
 
 function exportarBackup() {
@@ -2594,6 +2717,111 @@ function salvarNovaSenha() {
   S.set(chaveAtual, nova);
   fecharModalTrocarSenha();
   toast('Senha alterada com sucesso!','success');
+}
+
+// ============================================================
+// PERFIL DO PROFESSOR
+// ============================================================
+function abrirPerfilProfessor() {
+  if (!usuarioLogado) return;
+  
+  const perfil = usuarioLogado;
+  const c = document.getElementById('conteudoPerfilProfessor');
+  
+  // Carrega foto do localStorage se existir
+  const fotoSalva = S.get('foto_' + perfil.usuario) || perfil.foto || '';
+  
+  c.innerHTML = `
+    <div style="display:grid; grid-template-columns: 200px 1fr; gap: 24px;">
+      <!-- COLUNA DA FOTO -->
+      <div style="text-align:center;">
+        <div id="previewFotoPerfil" style="width:180px; height:180px; border-radius:50%; background:linear-gradient(135deg, var(--brand), var(--accent)); display:flex; align-items:center; justify-content:center; font-size:64px; color:white; margin:0 auto 16px; overflow:hidden; border:4px solid var(--border2);">
+          ${fotoSalva ? `<img src="${fotoSalva}" alt="Foto" style="width:100%; height:100%; object-fit:cover;">` : perfil.nome[0].toUpperCase()}
+        </div>
+        <div class="field">
+          <label>URL da Foto</label>
+          <input type="url" id="perfilFotoUrl" placeholder="https://exemplo.com/foto.jpg" value="${fotoSalva}" onchange="atualizarPreviewFoto()">
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="removerFotoPerfil()">🗑️ Remover foto</button>
+      </div>
+      
+      <!-- COLUNA DOS DADOS -->
+      <div>
+        <div class="field">
+          <label>Nome Completo</label>
+          <input type="text" id="perfilNome" value="${perfil.nome}">
+        </div>
+        <div class="field">
+          <label>E-mail</label>
+          <input type="email" id="perfilEmail" value="${perfil.email}" readonly style="background:var(--surface2); cursor:not-allowed;">
+        </div>
+        <div class="field">
+          <label>Disciplina(s)</label>
+          <input type="text" id="perfilDisciplina" placeholder="Ex: Matemática, Física" value="${perfil.disciplina || ''}">
+          <small style="color:var(--text-soft); font-size:.75rem;">Separe múltiplas disciplinas por vírgula</small>
+        </div>
+        <div class="field">
+          <label>Carga Horária Semanal</label>
+          <input type="text" id="perfilCargaHoraria" placeholder="Ex: 20h/a" value="${perfil.cargaHoraria || ''}">
+        </div>
+        <div class="info-box" style="margin-top:16px;">
+          <strong>📋 Planos Salvos:</strong><br>
+          <span style="color:var(--text-mid); font-size:.85rem;">Os planos deste professor estão disponíveis para o coordenador visualizar através do painel de gerenciamento.</span>
+        </div>
+      </div>
+    </div>
+  `;
+  
+  document.getElementById('modalPerfilProfessor').classList.remove('hidden');
+}
+
+function fecharModalPerfilProfessor() { 
+  document.getElementById('modalPerfilProfessor').classList.add('hidden'); 
+}
+
+function atualizarPreviewFoto() {
+  const url = document.getElementById('perfilFotoUrl').value.trim();
+  const preview = document.getElementById('previewFotoPerfil');
+  
+  if (url) {
+    preview.innerHTML = `<img src="${url}" alt="Foto" style="width:100%; height:100%; object-fit:cover;" onerror="this.parentElement.innerHTML='${usuarioLogado.nome[0].toUpperCase()}'">`;
+  } else {
+    preview.innerHTML = usuarioLogado.nome[0].toUpperCase();
+  }
+}
+
+function removerFotoPerfil() {
+  document.getElementById('perfilFotoUrl').value = '';
+  document.getElementById('previewFotoPerfil').innerHTML = usuarioLogado.nome[0].toUpperCase();
+}
+
+function salvarPerfilProfessor() {
+  if (!usuarioLogado) return;
+  
+  const nome = document.getElementById('perfilNome').value.trim();
+  const disciplina = document.getElementById('perfilDisciplina').value.trim();
+  const cargaHoraria = document.getElementById('perfilCargaHoraria').value.trim();
+  const foto = document.getElementById('perfilFotoUrl').value.trim();
+  
+  if (!nome) { toast('Nome é obrigatório', 'error'); return; }
+  
+  // Atualiza dados do usuário
+  usuarioLogado.nome = nome;
+  usuarioLogado.disciplina = disciplina;
+  usuarioLogado.cargaHoraria = cargaHoraria;
+  usuarioLogado.foto = foto;
+  
+  // Salva no localStorage
+  S.setObj('usuario_' + usuarioLogado.usuario, usuarioLogado);
+  S.set('foto_' + usuarioLogado.usuario, foto);
+  S.setObj('sessao', usuarioLogado);
+  
+  // Atualiza interface
+  document.getElementById('userNome').textContent = nome.split(' ')[0];
+  document.getElementById('userAvatar').textContent = nome[0].toUpperCase();
+  
+  fecharModalPerfilProfessor();
+  toast('Perfil atualizado com sucesso!', 'success');
 }
 
 // ============================================================
