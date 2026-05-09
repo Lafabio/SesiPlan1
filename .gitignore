@@ -1,3 +1,26 @@
-Nothing should be ignored in this case, as the only file change is adding a text file (.txt), which is a source/config file and not a build artifact, dependency, or temporary file.
+```gitignore
+# Compiled and build artifacts
+*.pyc
+__pycache__/
 
-(empty output)
+# Dependencies
+node_modules/
+venv/
+.venv/
+.env
+.env.local
+.env.*
+
+# Editors
+.vscode/
+.idea/
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+
+# System files
+.DS_Store
+Thumbs.db
+```
